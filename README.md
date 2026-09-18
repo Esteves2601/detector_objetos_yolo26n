@@ -159,7 +159,7 @@ Este código wrapper é livre para uso educacional e pesquisa.
 
 ---
 
-## 🙋 Autor
+## Autor
 
 **Esteves2601** — [GitHub](https://github.com/Esteves2601)
 
