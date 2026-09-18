@@ -1,85 +1,166 @@
-# Detector de Objetos YOLO26n
+# Detector de Objetos YOLO26n — Multi-plataforma Offline
 
-Detecção de objetos com modelo oficial `Ultralytics/YOLO26` (variante nano `yolo26n.pt`).
-Duas entradas: **Tkinter GUI** (`app_gui.py`) e **CLI** (`detector_objeto.py`), com
-imagem, vídeo, webcam ao vivo e Gradio opcional.
+Detector de objetos baseado no modelo oficial **Ultralytics/YOLO26 (variante nano `yolo26n.pt`)**, com suporte a **três frentes de execução 100% offline**: desktop (Windows), mobile nativo (Android) e PWA (navegador).
 
-## O que o projeto faz
+---
 
-- `prever()` — chamada única ao YOLO com `imgsz` automático (imagem/vídeo → 640, stream → 320).
-- `contar()` / `resumir_contagem()` — contagem por classe.
-- `detectar_arquivo()` — imagem ou pasta → anota e salva em `outputs/`.
-- `processar_video()` — vídeo → anotado em temp + resumo de frames/classes.
-- `rodar_webcam_opencv()` / GUI — webcam espelhada com FPS, salvar frame com `s`.
-- `rodar_gradio()` — interface web opcional (imagem, streaming, vídeo).
+## 🎯 O que o projeto faz
 
-## Estrutura
+Detecção de objetos em tempo real ou em arquivos (imagem/vídeo) usando o modelo **YOLO26n** da Ultralytics, com três opções de uso:
+
+| Plataforma | Como roda | Recursos |
+|------------|-----------|----------|
+| **Desktop (Windows)** | Executável `.exe` (clique duplo) | Webcam tempo real com pausar/retomar, salvar frame em pasta escolhida, abrir imagem/vídeo do disco, resultados salvos em `outputs/` |
+| **Mobile Nativo (Android)** | APK instalável (offline total) | Câmera frontal/traseira (troca com botão), tempo real contínuo, capturar foto, escolher da galeria, salvar na galeria (`Imagens/YOLO26n/`) |
+| **PWA (Navegador)** | Servidor local + celular no mesmo Wi-Fi | Câmera (foto na hora) / galeria, resultado anotado + contagem, "Adicionar à tela inicial" instala como app |
+
+---
+
+## 🤖 Modelo Utilizado
+
+**Modelo base:** [`Ultralytics/YOLO26`](https://huggingface.co/Ultralytics/YOLO26) — variante **nano (`yolo26n.pt`)**  
+**Fonte oficial:** Hugging Face Hub — `Ultralytics/YOLO26`  
+**Task:** Detecção de objetos (80 classes COCO)
+
+### O que foi alterado/adicionado em relação ao modelo original:
+
+| Item | Original (Ultralytics) | Este Projeto |
+|------|------------------------|--------------|
+| **Formato** | PyTorch `.pt` (requer Python + dependências) | Mantido `.pt` + **exportado para ONNX** (9.3 MB, imgsz 320) para inferência mobile nativa |
+| **Inferência** | API `ultralytics.YOLO` padrão | Wrapper com **auto-imgsz** (640 imagem/vídeo, 320 stream), **clamp de coordenadas**, **NMS por classe**, **auto-detecção de shape ONNX** |
+| **Execução** | Só Python + dependências pesadas | **3 frentes**: Windows `.exe` standalone, Android APK nativo (ONNX Runtime), PWA via Flask |
+| **Deploy** | `pip install ultralytics` + código | `.exe` standalone (PyInstaller), APK (Gradle), PWA (Flask) — **tudo offline** |
+| **Interface** | CLI / Gradio opcional | **GUI Tkinter** (desktop), **App Android nativo** (Kotlin + CameraX), **PWA mobile-first** |
+
+### Adições deste projeto (não existiam no modelo original):
+
+1. **Auto-imgsz inteligente** — detecta resolução da entrada e escolhe 640 (imagem/vídeo) ou 320 (stream) automaticamente
+2. **Parser ONNX robusto** — detecta shape de saída automaticamente (`[1,84,N]`, `[1,N,84]`, flat), faz transpose se necessário, bounds checking em coordenadas
+3. **Core modularizado** (`src/`) — config, modelo lazy singleton, inferência, mídia, Gradio separados; sem side-effects no import
+4. **Desktop standalone** — PyInstaller com `--collect-all torchvision` (inclui operador `nms` nativo), ícone custom, thread-safe webcam
+5. **Android nativo** — CameraX + ONNX Runtime 1.17.1, `ImageAnalysis` recriado a cada bind (troca câmera + tempo real), `AutoCloseable` para limpeza de sessão
+6. **PWA mobile-first** — Flask + HTML com `capture="environment"`, manifest + service worker, instala como app nativo
+7. **Organização** — pastas `data/exemplos/`, `outputs/`, `assets/`, `tools/`; `.gitignore` limpo; atalhos `.vbs`/`.bat` para Windows
+
+---
+
+## 📁 Estrutura do Projeto
 
 ```
-app_gui.py           GUI Tkinter (câmera ao vivo | escolher arquivo)
-app_web.py           Servidor web mobile/PWA — celular acessa via Wi-Fi
-detector_objeto.py   CLI + fachada de compatibilidade (--modo imagem|webcam|video|gradio|benchmark)
-mobile_app/          Cliente Android (Kivy + buildozer.spec) — envia foto ao app_web.py
-assets/              Ícones do app (icon.png/.ico, icon-192/512 p/ PWA e Android)
-tools/               make_icon.py, export_mobile.py (TFLite/NCNN p/ inferência on-device)
-src/
-  config.py          constantes (HF, imgsz, device, pastas, extensões)
-  modelo.py          singleton lazy do YOLO (sem side-effect no import)
-  inference.py       prever/contar/anotar/detectar + auto-imgsz
-  midia.py           imagem/vídeo/webcam + exibição/salvamento
-  gradio_app.py      interface web opcional
-data/exemplos/       imagens de exemplo
-outputs/             resultados `*_detectado.*` e frames (ignorado no git)
-requirements.txt
+.
+├── app_gui.py              # GUI Desktop (Tkinter) — webcam tempo real | escolher arquivo
+├── app_web.py              # Servidor PWA (Flask) — acesso via Wi-Fi no celular
+├── detector_objeto.py      # CLI + fachada de compatibilidade (--modo imagem|webcam|video|benchmark)
+├── dist/                   # Executável Windows (DetectorYOLO26n.exe) — gerado pelo PyInstaller
+├── android/                # Projeto Android nativo (Kotlin + Gradle)
+│   ├── app/src/main/
+│   │   ├── assets/
+│   │   │   ├── yolo26n.onnx      # Modelo ONNX (9.3 MB, imgsz 320)
+│   │   │   └── labels.txt        # 80 classes COCO
+│   │   ├── java/org/yolo26/detector/
+│   │   │   ├── MainActivity.kt   # CameraX + ImageAnalysis + tempo real
+│   │   │   ├── YoloDetector.kt   # ONNX Runtime + parser robusto
+│   │   │   └── OverlayView.kt    # Desenha caixas sobre preview
+│   │   └── res/                  # Layout, ícones, temas
+│   └── build.gradle              # ONNX Runtime 1.17.1, CameraX 1.3.1
+├── assets/                 # Ícones (icon.png/.ico, icon-192/512.png p/ PWA/Android)
+├── data/exemplos/          # Imagens de teste
+├── outputs/                # Resultados salvos (ignorado no git)
+├── exports/                # Modelos exportados (ONNX)
+├── mobile_app/             # Protótipo Kivy (cliente-servidor) — legado
+├── src/                    # Core Python modularizado
+│   ├── __init__.py
+│   ├── config.py           # Constantes centralizadas (HF, imgsz, device, pastas)
+│   ├── modelo.py           # Singleton lazy do YOLO (fuse + warmup)
+│   ├── inference.py        # prever(), contar(), anotar(), auto-imgsz
+│   ├── midia.py            # Imagem/vídeo/webcam + exibição/salvamento
+│   └── gradio_app.py       # Interface Gradio opcional
+├── tools/
+│   ├── export_mobile.py    # Exporta .pt → ONNX/TFLite/NCNN
+│   ├── make_icon.py        # Gera ícones do app
+│   └── validar_onnx.py     # Valida inferência ONNX local
+├── requirements.txt        # Dependências (ultralytics, torch, opencv, onnxruntime, flask opcional)
+└── .gitignore
 ```
 
-## Uso
+---
 
+## 🚀 Como Usar
+
+### 1. Desktop (Windows) — Mais simples
 ```bash
+# Opção A: Executável pronto (clique duplo)
+dist/DetectorYOLO26n.exe
+
+# Opção B: Via Python
 pip install -r requirements.txt
 python app_gui.py
-python detector_objeto.py --modo imagem --origem ./data/exemplos/_MG_3910.JPG --sem-exibir
+```
+
+### 2. Mobile Nativo (Android) — Offline total
+1. Abra a pasta `android/` no **Android Studio**
+2. Aguarde o Gradle Sync → **Run ▶** (celular via USB) ou **Build > Build APK(s)**
+3. Instale o APK no celular → permita câmera → use
+
+> O modelo `yolo26n.onnx` já está embutido em `app/src/main/assets/`
+
+### 3. PWA (Navegador do celular) — Via Wi-Fi
+```bash
+pip install flask
+python app_web.py
+```
+No celular (mesmo Wi-Fi): abra `http://<IP-DO-PC>:5000` → menu do navegador > **Adicionar à tela inicial**
+
+### 4. CLI (Terminal)
+```bash
+python detector_objeto.py --modo imagem --origem ./data/exemplos/_MG_3910.JPG
 python detector_objeto.py --modo webcam
 python detector_objeto.py --modo video --origem ./video.mp4
 python detector_objeto.py --modo benchmark
-pip install "gradio>=4"; python detector_objeto.py --modo gradio
 ```
 
-## Celular (2 opções)
+---
 
-**A — PWA, sem instalar nada (recomendado):**
-```bash
-pip install flask
-py app_web.py
+## 🔧 Recompilar / Gerar Artefatos
+
+| Artefato | Comando |
+|----------|---------|
+| **Executável Windows** | `py -m PyInstaller --noconfirm DetectorYOLO26n.spec` |
+| **APK Android** | Abrir `android/` no Android Studio → Build > Build APK(s) |
+| **Exportar ONNX** | `python tools/export_mobile.py --formato onnx --imgsz 320` |
+| **Validar ONNX** | `python tools/validar_onnx.py` |
+| **Gerar ícones** | `python tools/make_icon.py` |
+
+---
+
+## 📦 Dependências Principais
+
+```txt
+# Core (obrigatório)
+ultralytics>=8.3
+torch>=2.0
+opencv-python>=4.8
+numpy>=1.24
+Pillow>=10
+onnx>=1.15
+onnxruntime>=1.17
+
+# Opcional
+flask>=3.0          # Para app_web.py (PWA)
+# gradio>=4         # Para detector_objeto.py --modo gradio
 ```
-No celular (mesmo Wi-Fi), abra o `http://<IP>:5000` impresso no terminal,
-depois menu do navegador > **Adicionar à tela inicial** (ícone próprio, tela cheia).
-Botões de câmera (foto na hora) e galeria, com resultado anotado + contagem.
 
-**B — APK nativo offline (de verdade, sem servidor):**
-`android/` é um projeto Android completo (Kotlin + CameraX + ONNX Runtime).
-O modelo `yolo26n.onnx` (9,3 MB, imgsz 320) já está em `app/src/main/assets/`
-e foi validado aqui via onnxruntime (`tools/validar_onnx.py`).
-Para gerar o APK: abra a pasta `android/` no **Android Studio** → aguarde o
-Sync → **Run ▶** num celular via USB (ou Build > Build APK).
-Ícone do app já aplicado (`@drawable/icon`, o olho-detector).
-`mobile_app/` (Kivy) é o protótipo antigo cliente-servidor — desconsidere.
+---
 
-## Executável Windows
+## 📝 Licença
 
-`dist/DetectorYOLO26n.exe` — clique duplo, sem console, com ícone próprio
-(`assets/icon.ico`, olho-detector + bounding box). Otimizações aplicadas:
-exclusão de gradio/matplotlib/jupyter/testes/tensorboard, modelo e `data/`
-embutidos, pastas resolvidas para o lado do `.exe` (modo frozen).
-Recompilar: `py -m PyInstaller --noconfirm DetectorYOLO26n.spec`
+O modelo **YOLO26** é da **Ultralytics** (licença AGPL-3.0).  
+Este código wrapper é livre para uso educacional e pesquisa.
 
-## Redundâncias removidas nesta revisão
+---
 
-- `Arquivos/detector_objeto.py` era cópia antiga (sem auto-imgsz) → removida; imagens foram para `data/exemplos/`, resultados para `outputs/`.
-- `Arquivos/requirements.txt` duplicado → removido.
-- `matplotlib` não era usado → saiu do `requirements.txt`; `gradio` virou opcional.
-- Modelo não carrega mais no `import` → `src/modelo.py:get_model()` com fuse + warmup uma vez.
-- Contagem de classes triplicada → `src/inference.py:contar()` única.
-- `app_gui.py`: variável `rgb` morta removida; `salvar_frame` recapturava outro frame (bug) → agora salva o frame exibido; `messagebox`/status em thread via `after()`; janela de vídeo e save centralizados em `outputs/`.
-- Saídas `*_detectado` não poluem mais a pasta de origem → sempre em `outputs/`.
-- `DEVICE` misturava `int`/`str` → `IS_CUDA` + `DEVICE` documentados em `src/config.py`.
+## 🙋 Autor
+
+**Esteves2601** — [GitHub](https://github.com/Esteves2601)
+
+> Projeto criado para demonstrar deploy multi-plataforma offline de modelo YOLO (desktop + mobile nativo + PWA) a partir de um único modelo base.
