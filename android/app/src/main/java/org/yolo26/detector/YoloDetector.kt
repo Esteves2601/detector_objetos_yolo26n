@@ -24,9 +24,10 @@ class YoloDetector(ctx: Context) : AutoCloseable {
     private val env: OrtEnvironment = OrtEnvironment.getEnvironment()
     private val session: OrtSession
     val labels: List<String>
-    private var numAnchors = 0
     private var numClasses = 0
-    private var outputLayout = 0  // 0 = [1, 84, N], 1 = [1, N, 84], 2 = flat
+    private var numAnchors = 0
+    private var channels = 0
+    private var isTransposed = false
 
     init {
         val modelBytes = ctx.assets.open("yolo26n.onnx").use { it.readBytes() }
@@ -38,50 +39,58 @@ class YoloDetector(ctx: Context) : AutoCloseable {
         val dummyTensor = OnnxTensor.createTensor(env, dummy, longArrayOf(1, 3, IMGSZ.toLong(), IMGSZ.toLong()))
         session.run(Collections.singletonMap("images", dummyTensor)).use { res ->
             val raw = res[0].value
-            Log.d("YOLO26", "ONNX output class: ${raw.javaClass.name}")
-            if (raw is Array<*>) {
-                Log.d("YOLO26", "Array depth 1, length=${raw.size}")
-                if (raw.size > 0 && raw[0] is Array<*>) {
-                    val second = raw[0] as Array<*>
-                    Log.d("YOLO26", "Array depth 2, second.length=${second.size}")
-                    if (second.size > 0 && second[0] is FloatArray) {
-                        val third = second[0] as FloatArray
-                        Log.d("YOLO26", "Array depth 3, third.length=${third.size}")
-                        if (raw.size == 1) {
-                            val dim1 = second.size
-                            val dim2 = third.size
-                            Log.d("YOLO26", "Shape detectado: [1, $dim1, $dim2]")
-                            if (dim1 == 84 && dim2 > 100) {
-                                outputLayout = 0
-                                numAnchors = dim2
-                            } else if (dim2 == 84 && dim1 > 100) {
-                                outputLayout = 1
-                                numAnchors = dim1
-                            } else {
-                                outputLayout = 0
-                                numAnchors = max(dim1, dim2)
-                            }
-                        }
-                    }
-                } else if (raw.size == 1 && raw[0] is FloatArray) {
-                    val flat = raw[0] as FloatArray
-                    Log.d("YOLO26", "Flat array length=${flat.size}")
-                    if (flat.size % 84 == 0) {
-                        outputLayout = 2
-                        numAnchors = flat.size / 84
-                    }
-                }
-            } else if (raw is FloatArray) {
-                Log.d("YOLO26", "Flat FloatArray, length=${raw.size}")
-                if (raw.size % 84 == 0) {
-                    outputLayout = 2
-                    numAnchors = raw.size / 84
-                }
-            }
-            Log.d("YOLO26", "Layout=$outputLayout, anchors=$numAnchors")
+            Log.d("YOLO26", "=== ONNX OUTPUT SHAPE DEBUG ===")
+            Log.d("YOLO26", "Class: ${raw.javaClass.name}")
+            analyzeOutput(raw)
+            Log.d("YOLO26", "numAnchors=$numAnchors, channels=$channels, isTransposed=$isTransposed")
         }
         dummyTensor.close()
-        Log.d("YOLO26", "Detector inicializado: layout=$outputLayout, anchors=$numAnchors, classes=$numClasses")
+        Log.d("YOLO26", "Detector pronto: anchors=$numAnchors, classes=$numClasses, transposed=$isTransposed")
+    }
+
+    private fun analyzeOutput(raw: Any) {
+        if (raw !is Array<*>) {
+            Log.e("YOLO26", "Output não é Array: ${raw.javaClass}")
+            return
+        }
+        Log.d("YOLO26", "Depth 1: size=${raw.size}")
+        if (raw.size == 0) return
+
+        val first = raw[0]
+        if (first !is Array<*>) {
+            Log.d("YOLO26", "Depth 1 element is not Array: ${first?.javaClass}")
+            return
+        }
+        val second = first as Array<*>
+        Log.d("YOLO26", "Depth 2: size=${second.size}")
+        if (second.size == 0) return
+
+        val third = second[0]
+        if (third !is FloatArray) {
+            Log.d("YOLO26", "Depth 3 element not FloatArray: ${third?.javaClass}")
+            return
+        }
+
+        val dim1 = second.size
+        val dim2 = (second[0] as FloatArray).size
+        Log.d("YOLO26", "Shape detectado: [1, $dim1, $dim2]")
+
+        if (dim1 == 84 && dim2 > 100) {
+            channels = 84
+            numAnchors = dim2
+            isTransposed = false
+            Log.d("YOLO26", "Layout: [1, 84, N] -> channels=84, anchors=N")
+        } else if (dim2 == 84 && dim1 > 100) {
+            channels = 84
+            numAnchors = dim1
+            isTransposed = true
+            Log.d("YOLO26", "Layout: [1, N, 84] -> channels=84, anchors=N (transposed)")
+        } else {
+            channels = min(dim1, dim2)
+            numAnchors = max(dim1, dim2)
+            isTransposed = (dim2 == 84)
+            Log.w("YOLO26", "Layout inesperado, fallback: channels=$channels, anchors=$numAnchors, transposed=$isTransposed")
+        }
     }
 
     override fun close() {
@@ -91,7 +100,8 @@ class YoloDetector(ctx: Context) : AutoCloseable {
 
     fun detect(src: Bitmap): Pair<List<Detection>, Long> {
         val t0 = System.nanoTime()
-        // letterbox 320x320 (calculado uma vez, fora do use)
+
+        // Letterbox calculado UMA VEZ
         val scale = min(IMGSZ / src.width.toFloat(), IMGSZ / src.height.toFloat())
         val nw = (src.width * scale).toInt()
         val nh = (src.height * scale).toInt()
@@ -114,80 +124,58 @@ class YoloDetector(ctx: Context) : AutoCloseable {
             buf.put(base + i, ((c shr 8) and 0xFF) / 255f)
             buf.put(2 * base + i, (c and 0xFF) / 255f)
         }
+
         val tensor = OnnxTensor.createTensor(env, buf, longArrayOf(1, 3, IMGSZ.toLong(), IMGSZ.toLong()))
-        val outRaw: Array<FloatArray> = session.run(Collections.singletonMap("images", tensor)).use { res ->
+        val output: Array<FloatArray> = session.run(Collections.singletonMap("images", tensor)).use { res ->
             val raw = res[0].value
-            val arr = mutableListOf<FloatArray>()
-            when (raw) {
-                is Array<*> -> {
-                    if (raw.size > 0 && raw[0] is Array<*>) {
-                        val second = raw[0] as Array<*>
-                        if (second.size > 0 && second[0] is FloatArray) {
-                            val dim1 = second.size
-                            val dim2 = (second[0] as FloatArray).size
-                            if (dim1 == 84 && dim2 > 100) {
-                                // [84, N] -> transpor para [N, 84]
-                                for (c in 0 until numAnchors) {
-                                    val row = FloatArray(84)
-                                    for (r in 0 until 84) {
-                                        if (r < second.size && second[r] is FloatArray) {
-                                            val rowData = second[r] as FloatArray
-                                            if (c < rowData.size) row[r] = rowData[c]
-                                        }
-                                    }
-                                    arr.add(row)
-                                }
-                            } else if (dim2 == 84 && dim1 > 100) {
-                                // [N, 84]
-                                for (r in 0 until numAnchors) {
-                                    if (r < second.size && second[r] is FloatArray) {
-                                        val rowData = second[r] as FloatArray
-                                        val row = FloatArray(84)
-                                        val len = min(rowData.size, 84)
-                                        System.arraycopy(rowData, 0, row, 0, len)
-                                        arr.add(row)
-                                    } else {
-                                        arr.add(FloatArray(84))
+            val rows = mutableListOf<FloatArray>()
+
+            if (raw is Array<*>) {
+                val first = raw[0]
+                if (first is Array<*>) {
+                    val second = first as Array<*>
+                    if (second.size > 0 && second[0] is FloatArray) {
+                        val dim1 = second.size
+                        val dim2 = (second[0] as FloatArray).size
+
+                        if (!isTransposed) {
+                            // [84, N] -> transpose para [N, 84]
+                            for (c in 0 until numAnchors) {
+                                val row = FloatArray(channels)
+                                for (r in 0 until channels) {
+                                    if (r < second.size) {
+                                        val rowData = second[r] as? FloatArray
+                                        rowData?.let { if (c < it.size) row[r] = it[c] }
                                     }
                                 }
-                            } else {
-                                addFlatArray(arr, raw)
+                                rows.add(row)
                             }
-                        }
-                    } else if (raw.size == 1 && raw[0] is FloatArray) {
-                        val flat = raw[0] as FloatArray
-                        if (flat.size % 84 == 0) {
-                            val n = flat.size / 84
-                            for (i in 0 until n) {
-                                val row = FloatArray(84)
-                                System.arraycopy(flat, i * 84, row, 0, min(84, flat.size - i * 84))
-                                arr.add(row)
+                        } else {
+                            // [N, 84] -> já está correto
+                            for (r in 0 until numAnchors) {
+                                if (r < second.size && second[r] is FloatArray) {
+                                    val rowData = second[r] as FloatArray
+                                    val row = FloatArray(channels)
+                                    val len = min(rowData.size, channels)
+                                    System.arraycopy(rowData, 0, row, 0, len)
+                                    rows.add(row)
+                                } else {
+                                    rows.add(FloatArray(channels))
+                                }
                             }
-                        }
-                    }
-                }
-                is FloatArray -> {
-                    val flat = raw as FloatArray
-                    if (flat.size % 84 == 0) {
-                        val n = flat.size / 84
-                        for (i in 0 until n) {
-                            val row = FloatArray(84)
-                            System.arraycopy(flat, i * 84, row, 0, min(84, flat.size - i * 84))
-                            arr.add(row)
                         }
                     }
                 }
             }
-            if (arr.isEmpty()) {
-                Log.e("YOLO26", "Falha ao parsear saída ONNX")
+            if (rows.isEmpty()) {
+                Log.e("YOLO26", "Falha ao parsear saída - rows vazio")
                 return@use arrayOf()
             }
-            arr.toTypedArray()
+            rows.toTypedArray()
         }
         tensor.close()
 
-        val anchors = outRaw.size
-        if (anchors == 0) {
+        if (output.isEmpty()) {
             return emptyList<Detection>() to ((System.nanoTime() - t0) / 1_000_000)
         }
 
@@ -195,14 +183,16 @@ class YoloDetector(ctx: Context) : AutoCloseable {
         val scores = mutableListOf<Float>()
         val classes = mutableListOf<Int>()
 
-        for (i in 0 until outRaw.size) {
-            val row = outRaw[i]
+        for (i in 0 until output.size) {
+            val row = output[i]
             if (row.size < 4 + numClasses) continue
+
             var best = 0
             var bestScore = row[4]
             for (c in 1 until numClasses) {
-                if (c < row.size && row[4 + c] > bestScore) {
-                    bestScore = row[4 + c]
+                val idx = 4 + c
+                if (idx < row.size && row[idx] > bestScore) {
+                    bestScore = row[idx]
                     best = c
                 }
             }
@@ -213,6 +203,7 @@ class YoloDetector(ctx: Context) : AutoCloseable {
             val w = row[2]
             val h = row[3]
 
+            // cxcywh (letterbox) -> x1y1x2y2 (original) com clamp
             val x1 = (cx - w / 2 - dx) / scale
             val y1 = (cy - h / 2 - dy) / scale
             val x2 = (cx + w / 2 - dx) / scale
@@ -230,6 +221,7 @@ class YoloDetector(ctx: Context) : AutoCloseable {
             }
         }
 
+        // NMS por classe
         val keep = mutableListOf<Int>()
         val order = scores.indices.sortedByDescending { scores[it] }.toMutableList()
         while (order.isNotEmpty()) {
@@ -251,21 +243,6 @@ class YoloDetector(ctx: Context) : AutoCloseable {
             )
         }
         return dets to (System.nanoTime() - t0) / 1_000_000
-    }
-
-    private fun addFlatArray(arr: MutableList<FloatArray>, raw: Array<*>) {
-        // Tenta achar array flat dentro da estrutura
-        if (raw.size == 1 && raw[0] is FloatArray) {
-            val flat = raw[0] as FloatArray
-            if (flat.size % 84 == 0) {
-                val n = flat.size / 84
-                for (i in 0 until n) {
-                    val row = FloatArray(84)
-                    System.arraycopy(flat, i * 84, row, 0, min(84, flat.size - i * 84))
-                    arr.add(row)
-                }
-            }
-        }
     }
 
     private fun iou(a: FloatArray, b: FloatArray): Float {
