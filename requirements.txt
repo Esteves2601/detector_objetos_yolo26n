@@ -1,0 +1,19 @@
+# Núcleo obrigatório
+ultralytics>=8.3
+huggingface_hub>=0.23
+torch>=2.0
+opencv-python>=4.8
+numpy>=1.24
+Pillow>=10
+
+# Opcional — só para `python detector_objeto.py --modo gradio`
+# gradio>=4
+
+# Opcional — servidor web mobile/PWA (py app_web.py)
+flask>=3.0
+
+# Opcional — só no build Android legado via buildozer (mobile_app/): kivy plyer requests
+
+# Opcional — export/validação do modelo mobile (tools/export_mobile.py, tools/validar_onnx.py)
+# onnx>=1.15
+# onnxruntime>=1.17

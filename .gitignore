@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.idea/
+*.pt
+outputs/
+!outputs/.gitkeep
+tmp/
+build/
+dist/
+*.spec
