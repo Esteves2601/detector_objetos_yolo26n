@@ -16,9 +16,11 @@ data class Detection(val box: RectF, val label: String, val score: Float)
 
 class YoloDetector(ctx: Context) : AutoCloseable {
     companion object {
-        const val IMGSZ = 320
-        const val CONF = 0.30f
-        const val IOU = 0.50f
+        // 640 melhora precisão; 320 é mais rápido. Para captura única, use 640.
+        const val IMGSZ = 640
+        // Thresholds mais permissivos para não perder detecções
+        const val CONF = 0.25f
+        const val IOU = 0.45f
     }
 
     private val env: OrtEnvironment = OrtEnvironment.getEnvironment()
@@ -45,7 +47,7 @@ class YoloDetector(ctx: Context) : AutoCloseable {
             Log.d("YOLO26", "numAnchors=$numAnchors, channels=$channels, isTransposed=$isTransposed")
         }
         dummyTensor.close()
-        Log.d("YOLO26", "Detector pronto: anchors=$numAnchors, classes=$numClasses, transposed=$isTransposed")
+        Log.d("YOLO26", "Detector pronto: IMGSZ=$IMGSZ, anchors=$numAnchors, classes=$numClasses, transposed=$isTransposed")
     }
 
     private fun analyzeOutput(raw: Any) {
@@ -110,7 +112,7 @@ class YoloDetector(ctx: Context) : AutoCloseable {
 
         val resized = Bitmap.createScaledBitmap(src, nw, nh, true)
         val input = Bitmap.createBitmap(IMGSZ, IMGSZ, Bitmap.Config.ARGB_8888)
-        input.eraseColor(0xFF727272.toInt())
+        input.eraseColor(0xFF727272.toInt()) // 114,114,114 = padding YOLO padrão
         val canvas = android.graphics.Canvas(input)
         canvas.drawBitmap(resized, dx.toFloat(), dy.toFloat(), null)
 
@@ -187,6 +189,7 @@ class YoloDetector(ctx: Context) : AutoCloseable {
             val row = output[i]
             if (row.size < 4 + numClasses) continue
 
+            // Encontra melhor classe
             var best = 0
             var bestScore = row[4]
             for (c in 1 until numClasses) {
@@ -203,7 +206,7 @@ class YoloDetector(ctx: Context) : AutoCloseable {
             val w = row[2]
             val h = row[3]
 
-            // cxcywh (letterbox) -> x1y1x2y2 (original) com clamp
+            // cxcywh (letterbox space) -> x1y1x2y2 (original space) com clamp rigoroso
             val x1 = (cx - w / 2 - dx) / scale
             val y1 = (cy - h / 2 - dy) / scale
             val x2 = (cx + w / 2 - dx) / scale
@@ -221,7 +224,7 @@ class YoloDetector(ctx: Context) : AutoCloseable {
             }
         }
 
-        // NMS por classe
+        // NMS por classe - implementação mais robusta
         val keep = mutableListOf<Int>()
         val order = scores.indices.sortedByDescending { scores[it] }.toMutableList()
         while (order.isNotEmpty()) {
