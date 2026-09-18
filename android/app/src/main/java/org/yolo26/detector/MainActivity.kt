@@ -24,7 +24,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.AspectRatio
 import androidx.camera.core.CameraSelector
-import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.ImageProxy
@@ -34,13 +33,11 @@ import androidx.camera.view.PreviewView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import java.io.ByteArrayOutputStream
-import java.io.File
 import java.io.OutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicBoolean
 
 class MainActivity : AppCompatActivity() {
 
@@ -52,9 +49,6 @@ class MainActivity : AppCompatActivity() {
     private var detector: YoloDetector? = null
     private val bg = Executors.newSingleThreadExecutor()
     private var cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-    private var tempoRealAtivo = false
-    private val processando = AtomicBoolean(false)
-    private var ultimoBitmap: Bitmap? = null
 
     private val galeria = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) return@registerForActivityResult
@@ -74,7 +68,6 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnFoto).setOnClickListener { capturar() }
         findViewById<Button>(R.id.btnTrocarCamera).setOnClickListener { trocarCamera() }
         findViewById<Button>(R.id.btnSalvar).setOnClickListener { salvarFoto() }
-        findViewById<Button>(R.id.btnTempoReal).setOnClickListener { alternarTempoReal() }
         findViewById<Button>(R.id.btnGaleria).setOnClickListener { galeria.launch("image/*") }
 
         foto.setOnClickListener {
@@ -87,7 +80,7 @@ class MainActivity : AppCompatActivity() {
         bg.execute {
             try {
                 detector = YoloDetector(this)
-                runOnUiThread { status.text = "Modelo pronto. Fotografe, use tempo real ou escolha da galeria." }
+                runOnUiThread { status.text = "Modelo pronto. Fotografe ou escolha da galeria." }
             } catch (e: Exception) {
                 runOnUiThread { status.text = "Erro ao carregar modelo: ${e.message}" }
             }
@@ -129,26 +122,11 @@ class MainActivity : AppCompatActivity() {
                 .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
                 .build()
 
-            // Cria NOVO ImageAnalysis a cada bind
-            val analysis = ImageAnalysis.Builder()
-                .setTargetAspectRatio(AspectRatio.RATIO_4_3)
-                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                .build()
-                .also {
-                    it.setAnalyzer(bg) { image ->
-                        if (tempoRealAtivo && !processando.getAndSet(true)) {
-                            processarTempoReal(image)
-                        } else {
-                            image.close()
-                        }
-                    }
-                }
-
             try {
                 val cameraProvider = provider.get()
                 cameraProvider.unbindAll()
                 cameraProvider.bindToLifecycle(
-                    this, cameraSelector, previewUse, imageCapture, analysis)
+                    this, cameraSelector, previewUse, imageCapture)
             } catch (e: Exception) {
                 Log.e("YOLO26", "Falha na câmera", e)
                 runOnUiThread { status.text = "Falha na câmera: ${e.message}" }
@@ -163,7 +141,7 @@ class MainActivity : AppCompatActivity() {
             CameraSelector.DEFAULT_BACK_CAMERA
         val label = if (cameraSelector == CameraSelector.DEFAULT_BACK_CAMERA) "Traseira" else "Frontal"
         runOnUiThread { status.text = "Câmera $label. Reiniciando…" }
-        iniciarCamera() // Rebind completo recria o ImageAnalysis
+        iniciarCamera()
     }
 
     private fun capturar() {
@@ -193,34 +171,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun alternarTempoReal() {
-        tempoRealAtivo = !tempoRealAtivo
-        runOnUiThread {
-            status.text = if (tempoRealAtivo) "⚡ Tempo real ATIVO" else "Tempo real desligado"
-            findViewById<Button>(R.id.btnTempoReal).text = if (tempoRealAtivo) "⏸ Parar Tempo Real" else "⚡ Tempo Real"
-        }
-    }
-
-    private fun processarTempoReal(image: ImageProxy) {
-        try {
-            val bmp = proxyParaBitmap(image)
-            image.close()
-            val det = detector ?: return
-            val (dets, ms) = det.detect(bmp)
-            runOnUiThread {
-                overlay.setData(dets, bmp.width, bmp.height)
-                val resumo = if (dets.isEmpty()) "nada detectado"
-                else dets.groupingBy { it.label }.eachCount()
-                    .entries.joinToString { "${it.key}: ${it.value}" }
-                status.text = "⚡ $ms ms • ${dets.size} obj • $resumo"
-            }
-        } catch (e: Exception) {
-            Log.e("YOLO26", "Erro tempo real", e)
-            runOnUiThread { status.text = "Erro tempo real: ${e.message}" }
-        } finally {
-            processando.set(false)
-        }
-    }
+    private var ultimoBitmap: Bitmap? = null
 
     private fun analisar(bmp: Bitmap) {
         val det = detector

@@ -6,12 +6,12 @@ Detector de objetos baseado no modelo oficial **Ultralytics/YOLO26 (variante nan
 
 ## O que o projeto faz
 
-Detecção de objetos em tempo real ou em arquivos (imagem/vídeo) usando o modelo **YOLO26n** da Ultralytics, com três opções de uso:
+Detecção de objetos em arquivos (imagem/vídeo) e via webcam usando o modelo **YOLO26n** da Ultralytics, com três opções de uso:
 
 | Plataforma | Como roda | Recursos |
 |------------|-----------|----------|
-| **Desktop (Windows)** | Executável `.exe` (clique duplo) | Webcam tempo real com pausar/retomar, salvar frame em pasta escolhida, abrir imagem/vídeo do disco, resultados salvos em `outputs/` |
-| **Mobile Nativo (Android)** | APK instalável (offline total) | Câmera frontal/traseira (troca com botão), tempo real contínuo, capturar foto, escolher da galeria, salvar na galeria (`Imagens/YOLO26n/`) |
+| **Desktop (Windows)** | Executável `.exe` (clique duplo) | Webcam com detecção frame a frame, pausar/retomar, salvar frame em pasta escolhida, abrir imagem/vídeo do disco, resultados salvos em `outputs/` |
+| **Mobile Nativo (Android)** | APK instalável (offline total) | Câmera frontal/traseira (troca com botão), **captura única com detecção**, escolher da galeria, salvar na galeria (`Imagens/YOLO26n/`) |
 | **PWA (Navegador)** | Servidor local + celular no mesmo Wi-Fi | Câmera (foto na hora) / galeria, resultado anotado + contagem, "Adicionar à tela inicial" instala como app |
 
 ---
@@ -37,8 +37,8 @@ Detecção de objetos em tempo real ou em arquivos (imagem/vídeo) usando o mode
 1. **Auto-imgsz inteligente** — detecta resolução da entrada e escolhe 640 (imagem/vídeo) ou 320 (stream) automaticamente
 2. **Parser ONNX robusto** — detecta shape de saída automaticamente (`[1,84,N]`, `[1,N,84]`, flat), faz transpose se necessário, bounds checking em coordenadas
 3. **Core modularizado** (`src/`) — config, modelo lazy singleton, inferência, mídia, Gradio separados; sem side-effects no import
-4. **Desktop standalone** — PyInstaller com `--collect-all torchvision` (inclui operador `nms` nativo), ícone custom, thread-safe webcam
-5. **Android nativo** — CameraX + ONNX Runtime 1.17.1, `ImageAnalysis` recriado a cada bind (troca câmera + tempo real), `AutoCloseable` para limpeza de sessão
+4. **Desktop standalone** — PyInstaller com `--collect-all torchvision` (inclui operador `nms` nativo), ícone custom, thread-safe webcam com pausar/retomar
+5. **Android nativo** — CameraX + ONNX Runtime 1.17.1, **captura única com detecção**, troca de câmera frontal/traseira, salvar na galeria, `AutoCloseable` para limpeza de sessão
 6. **PWA mobile-first** — Flask + HTML com `capture="environment"`, manifest + service worker, instala como app nativo
 7. **Organização** — pastas `data/exemplos/`, `outputs/`, `assets/`, `tools/`; `.gitignore` limpo; atalhos `.vbs`/`.bat` para Windows
 
@@ -58,7 +58,7 @@ Detecção de objetos em tempo real ou em arquivos (imagem/vídeo) usando o mode
 │   │   │   ├── yolo26n.onnx      # Modelo ONNX (9.3 MB, imgsz 320)
 │   │   │   └── labels.txt        # 80 classes COCO
 │   │   ├── java/org/yolo26/detector/
-│   │   │   ├── MainActivity.kt   # CameraX + ImageAnalysis + tempo real
+│   │   │   ├── MainActivity.kt   # CameraX + captura única + troca câmera
 │   │   │   ├── YoloDetector.kt   # ONNX Runtime + parser robusto
 │   │   │   └── OverlayView.kt    # Desenha caixas sobre preview
 │   │   └── res/                  # Layout, ícones, temas
@@ -97,10 +97,14 @@ pip install -r requirements.txt
 python app_gui.py
 ```
 
+**Funcionalidades Desktop:** webcam com detecção frame a frame (pausar/retomar), salvar frame em pasta escolhida, abrir imagem/vídeo do disco, resultados salvos em `outputs/`
+
 ### 2. Mobile Nativo (Android) — Offline total
 1. Abra a pasta `android/` no **Android Studio**
 2. Aguarde o Gradle Sync → **Run ▶** (celular via USB) ou **Build > Build APK(s)**
 3. Instale o APK no celular → permita câmera → use
+
+**Funcionalidades Android:** câmera frontal/traseira (troca com botão), **captura única com detecção**, escolher da galeria, salvar na galeria (`Imagens/YOLO26n/`)
 
 > O modelo `yolo26n.onnx` já está embutido em `app/src/main/assets/`
 
@@ -110,6 +114,8 @@ pip install flask
 python app_web.py
 ```
 No celular (mesmo Wi-Fi): abra `http://<IP-DO-PC>:5000` → menu do navegador > **Adicionar à tela inicial**
+
+**Funcionalidades PWA:** câmera (foto na hora) / galeria, resultado anotado + contagem, "Adicionar à tela inicial" instala como app
 
 ### 4. CLI (Terminal)
 ```bash
@@ -149,6 +155,16 @@ onnxruntime>=1.17
 flask>=3.0          # Para app_web.py (PWA)
 # gradio>=4         # Para detector_objeto.py --modo gradio
 ```
+
+---
+
+## ⚠️ Nota sobre Tempo Real no Android
+
+A funcionalidade de **tempo real contínuo (preview com detecção ao vivo)** foi **removida da versão Android** devido a instabilidades no parser ONNX e problemas de performance no `ImageAnalysis` do CameraX. 
+
+A versão Android atual foca em **captura única confiável**: você aponta a câmera, aperta "Capturar", e o app faz a detecção naquele frame, mostrando o resultado com caixas e contagem. Mantém-se a troca de câmera (frontal/traseira), galeria e salvamento na galeria.
+
+O **Desktop (Windows)** mantém a detecção frame a frame com pausar/retomar, e o **PWA** funciona com captura única via navegador.
 
 ---
 
