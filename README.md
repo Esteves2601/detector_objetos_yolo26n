@@ -4,7 +4,7 @@ Detector de objetos baseado no modelo oficial **Ultralytics/YOLO26 (variante nan
 
 ---
 
-## 🎯 O que o projeto faz
+## O que o projeto faz
 
 Detecção de objetos em tempo real ou em arquivos (imagem/vídeo) usando o modelo **YOLO26n** da Ultralytics, com três opções de uso:
 
@@ -16,7 +16,7 @@ Detecção de objetos em tempo real ou em arquivos (imagem/vídeo) usando o mode
 
 ---
 
-## 🤖 Modelo Utilizado
+## Modelo Utilizado
 
 **Modelo base:** [`Ultralytics/YOLO26`](https://huggingface.co/Ultralytics/YOLO26) — variante **nano (`yolo26n.pt`)**  
 **Fonte oficial:** Hugging Face Hub — `Ultralytics/YOLO26`  
@@ -44,7 +44,7 @@ Detecção de objetos em tempo real ou em arquivos (imagem/vídeo) usando o mode
 
 ---
 
-## 📁 Estrutura do Projeto
+## Estrutura do Projeto
 
 ```
 .
@@ -85,7 +85,7 @@ Detecção de objetos em tempo real ou em arquivos (imagem/vídeo) usando o mode
 
 ---
 
-## 🚀 Como Usar
+## Como Usar
 
 ### 1. Desktop (Windows) — Mais simples
 ```bash
@@ -133,7 +133,7 @@ python detector_objeto.py --modo benchmark
 
 ---
 
-## 📦 Dependências Principais
+## Dependências Principais
 
 ```txt
 # Core (obrigatório)
@@ -152,7 +152,7 @@ flask>=3.0          # Para app_web.py (PWA)
 
 ---
 
-## 📝 Licença
+## Licença
 
 O modelo **YOLO26** é da **Ultralytics** (licença AGPL-3.0).  
 Este código wrapper é livre para uso educacional e pesquisa.
